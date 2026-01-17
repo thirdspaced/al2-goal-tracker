@@ -11,7 +11,8 @@ const GoalTrackerGenerator = () => {
   });
   const [textInputs, setTextInputs] = useState({
     transcriptText: '',
-    goalInfoText: ''
+    goalInfoText: '',
+    studentName: ''
   });
   const [useTextInput, setUseTextInput] = useState({
     transcript: false,
@@ -55,7 +56,7 @@ const GoalTrackerGenerator = () => {
     }
   };
 
-  const parseTreehouseTracker = (text) => {
+  const parseTreehouseTrackerForStudent = (text, studentName) => {
     const tasks = {
       reading: { task: '', complete: false, notes: '' },
       writing: { task: '', complete: false, notes: '' },
@@ -65,89 +66,105 @@ const GoalTrackerGenerator = () => {
       ctws: { task: '', complete: false, notes: '' }
     };
 
-    const lines = text.split('\n');
-    let currentStudent = '';
-    let studentColumn = -1;
-    let headerFound = false;
-    
-    // First pass: find student name and their column position
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      
-      // Look for student names in header row (often in a table format)
-      if (line.includes('Student') || /\b[A-Z][a-z]+\s+[A-Z][a-z]+\b/.test(line)) {
-        const names = line.split(/\t|\|/).map(s => s.trim()).filter(Boolean);
-        // Store all potential student names for later matching
-        currentStudent = names[0];
-        headerFound = true;
-      }
+    if (!studentName) {
+      return tasks;
     }
 
-    // Second pass: extract tasks and completion status
+    const lines = text.split('\n');
+    let studentColumnIndex = -1;
+    let headerRow = [];
+    
+    // First pass: Find the header row and student's column
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const lowerLine = line.toLowerCase();
+      const cells = lines[i].split('\t');
       
-      // Skip empty lines
-      if (!line.trim()) continue;
+      // Look for row containing student names
+      for (let j = 0; j < cells.length; j++) {
+        const cellValue = cells[j].trim();
+        // Check if this cell matches the student name (case-insensitive, partial match)
+        if (cellValue.toLowerCase().includes(studentName.toLowerCase()) ||
+            studentName.toLowerCase().includes(cellValue.toLowerCase())) {
+          studentColumnIndex = j;
+          headerRow = cells;
+          break;
+        }
+      }
+      
+      if (studentColumnIndex !== -1) break;
+    }
 
-      // Detect task rows by looking for subject keywords
+    // If student not found, return empty tasks
+    if (studentColumnIndex === -1) {
+      console.log(`Student "${studentName}" not found in tracker`);
+      return tasks;
+    }
+
+    // Second pass: Extract tasks for this specific student
+    for (let i = 0; i < lines.length; i++) {
+      const cells = lines[i].split('\t');
+      
+      // Skip header row
+      if (cells === headerRow) continue;
+      
+      const firstCell = cells[0]?.trim().toLowerCase() || '';
+      
+      // Skip empty rows
+      if (!firstCell) continue;
+
+      // Identify the subject/task type from first column
       let taskType = null;
-      let taskDescription = '';
-      let isComplete = false;
-
-      if (lowerLine.includes('reading') || lowerLine.includes('lexia')) {
+      
+      if (firstCell.includes('reading') || firstCell.includes('lexia')) {
         taskType = 'reading';
-      } else if (lowerLine.includes('writing') || lowerLine.includes('typing')) {
+      } else if (firstCell.includes('writing') || firstCell.includes('typing')) {
         taskType = 'writing';
-      } else if (lowerLine.includes('computation') || lowerLine.includes('zearn') || lowerLine.includes('reflex') || lowerLine.includes('math')) {
+      } else if (firstCell.includes('computation') || firstCell.includes('zearn') || 
+                 firstCell.includes('reflex') || firstCell.includes('math')) {
         taskType = 'computation';
-      } else if (lowerLine.includes('communication')) {
+      } else if (firstCell.includes('communication')) {
         taskType = 'communication';
-      } else if (lowerLine.includes('observation')) {
+      } else if (firstCell.includes('observation')) {
         taskType = 'observation';
-      } else if (lowerLine.includes('ctws') || lowerLine.includes('ct/ws') || lowerLine.includes('ct ws')) {
+      } else if (firstCell.includes('ctws') || firstCell.includes('ct/ws') || 
+                 firstCell.includes('ct ws')) {
         taskType = 'ctws';
       }
 
-      if (taskType) {
-        // Extract task description (everything before completion marker)
-        const parts = line.split(/[✓✔☑]/);
-        taskDescription = parts[0].trim();
+      if (taskType && studentColumnIndex < cells.length) {
+        const studentCell = cells[studentColumnIndex]?.trim() || '';
         
-        // Check for completion markers
-        isComplete = /[✓✔☑]/.test(line) || 
-                    line.includes('[x]') || 
-                    line.includes('[X]') ||
-                    /\s+x\s+/i.test(line) ||
-                    lowerLine.includes('done') ||
-                    lowerLine.includes('complete');
-
-        // Look for specific task details (units, lessons, etc.)
-        const unitsMatch = line.match(/(\d+)\s*(units?|lessons?)/i);
-        const blocksMatch = line.match(/(\d+)\s*blocks?/i);
+        // Skip if empty (task not assigned to this student)
+        if (!studentCell) continue;
         
-        if (unitsMatch) {
-          taskDescription = taskDescription || `${unitsMatch[1]} ${unitsMatch[2]}`;
-        } else if (blocksMatch) {
-          taskDescription = taskDescription || `${blocksMatch[1]} blocks`;
-        }
-
-        // Clean up task description
-        taskDescription = taskDescription
-          .replace(/[✓✔☑\[\]x]/gi, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-
-        tasks[taskType].task = taskDescription;
-        tasks[taskType].complete = isComplete;
-
-        // Look for completion notes in next line
-        if (i + 1 < lines.length) {
-          const nextLine = lines[i + 1].toLowerCase();
-          if (nextLine.includes('did') || nextLine.includes('completed') || nextLine.includes('finished')) {
-            tasks[taskType].notes = lines[i + 1].trim();
+        // Check for checkbox symbols (indicates task is assigned)
+        const hasCheckbox = /[\u2610\u2611\u2612\u2713\u2714\u2715☐☑☒✓✔✕□■x]/.test(studentCell) ||
+                           studentCell === '□' || 
+                           studentCell === '☑' ||
+                           studentCell === '✓' ||
+                           studentCell === '✔' ||
+                           studentCell.toLowerCase() === 'x';
+        
+        // If cell has content, consider it assigned
+        if (studentCell) {
+          // Determine if completed (checked box or "done" text)
+          const isComplete = /[\u2611\u2612\u2713\u2714☑☒✓✔]/.test(studentCell) ||
+                            studentCell.toLowerCase().includes('done') ||
+                            studentCell.toLowerCase().includes('complete') ||
+                            studentCell.toLowerCase() === 'x';
+          
+          // Extract task description (remove checkbox symbols)
+          let description = studentCell
+            .replace(/[\u2610\u2611\u2612\u2713\u2714\u2715☐☑☒✓✔✕□■]/g, '')
+            .replace(/^x$/i, '')
+            .trim();
+          
+          // Use first column as description if student cell only has checkbox
+          if (!description || description.length < 2) {
+            description = cells[0].trim();
           }
+          
+          tasks[taskType].task = description;
+          tasks[taskType].complete = isComplete;
         }
       }
     }
@@ -269,7 +286,7 @@ const GoalTrackerGenerator = () => {
       const line = lines[i];
       const lowerLine = line.toLowerCase();
       
-      // Extract student name
+      // Extract student name - look for "Student Name:" or just the name
       if (lowerLine.includes('student name') || lowerLine.includes('name:')) {
         // Try to get from same line first
         const colonSplit = line.split(':');
@@ -279,6 +296,9 @@ const GoalTrackerGenerator = () => {
           // Check next line
           info.studentName = lines[i + 1];
         }
+      } else if (i === 0 && /^[A-Z][a-z]+\s+[A-Z][a-z]+$/.test(line)) {
+        // If first line is a name format, use it
+        info.studentName = line;
       }
       
       // Extract week number - more flexible matching
@@ -365,13 +385,19 @@ const GoalTrackerGenerator = () => {
   };
 
   const generateGoalTracker = async () => {
-    // Check if we have all required inputs (either files or text)
+    // Check if we have all required inputs
     const hasTranscript = files.transcript || (useTextInput.transcript && textInputs.transcriptText.trim());
     const hasTracker = files.treehouseTracker;
     const hasGoalInfo = files.goalInfo || (useTextInput.goalInfo && textInputs.goalInfoText.trim());
+    const hasStudentName = textInputs.studentName.trim();
     
     if (!hasTranscript || !hasTracker || !hasGoalInfo) {
       setError('Please provide all three required inputs (either as files or text)');
+      return;
+    }
+
+    if (!hasStudentName) {
+      setError('Please enter the student name');
       return;
     }
 
@@ -392,9 +418,12 @@ const GoalTrackerGenerator = () => {
         : await extractTextFromDocx(files.goalInfo);
 
       // Parse each document
-      const tasks = parseTreehouseTracker(trackerText);
+      const tasks = parseTreehouseTrackerForStudent(trackerText, textInputs.studentName);
       const transcript = parseTranscript(transcriptText);
       const goalInfo = parseGoalInfo(goalInfoText);
+      
+      // Override student name from input field
+      goalInfo.studentName = textInputs.studentName;
 
       // Generate formatted output
       const formattedOutput = generateFormattedTracker(goalInfo, tasks, transcript);
@@ -576,6 +605,23 @@ ${workCompletionTable || '*No work tasks recorded this week*'}
               description="Student name, week #, goals"
               allowTextInput={true}
             />
+          </div>
+
+          {/* Student Name Input */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Student Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={textInputs.studentName}
+              onChange={(e) => setTextInputs(prev => ({ ...prev, studentName: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              placeholder="Enter student name (must match name in Treehouse Tracker)"
+            />
+            <p className="text-sm text-gray-500 mt-1">
+              This name should match a column header in your Treehouse Tracker (e.g., "Amari", "Gelsa")
+            </p>
           </div>
 
           {/* Error Display */}
