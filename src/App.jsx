@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { FileText, Upload, Download, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import mammoth from 'mammoth';
+import * as XLSX from 'xlsx';
 
 const GoalTrackerGenerator = () => {
   const [files, setFiles] = useState({
@@ -30,6 +31,25 @@ const GoalTrackerGenerator = () => {
       const arrayBuffer = await file.arrayBuffer();
       const result = await mammoth.extractRawText({ arrayBuffer });
       return result.value;
+    } catch (err) {
+      throw new Error(`Error reading ${file.name}: ${err.message}`);
+    }
+  };
+
+  const extractDataFromXLSX = async (file) => {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      
+      // Get the first sheet
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      
+      // Convert to JSON to preserve structure
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+      
+      // Convert back to text format for parsing
+      return jsonData.map(row => row.join('\t')).join('\n');
     } catch (err) {
       throw new Error(`Error reading ${file.name}: ${err.message}`);
     }
@@ -364,7 +384,8 @@ const GoalTrackerGenerator = () => {
         ? textInputs.transcriptText 
         : await extractTextFromDocx(files.transcript);
       
-      const trackerText = await extractTextFromDocx(files.treehouseTracker);
+      // Handle XLSX for Treehouse Tracker
+      const trackerText = await extractDataFromXLSX(files.treehouseTracker);
       
       const goalInfoText = useTextInput.goalInfo 
         ? textInputs.goalInfoText 
@@ -460,7 +481,7 @@ ${workCompletionTable || '*No work tasks recorded this week*'}
     alert('Goal tracker copied to clipboard!');
   };
 
-  const FileUploadBox = ({ title, fileType, description, allowTextInput = false }) => (
+  const FileUploadBox = ({ title, fileType, description, allowTextInput = false, acceptFiles = '.docx' }) => (
     <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-indigo-400 transition-colors">
       {allowTextInput && (
         <div className="mb-4">
@@ -512,7 +533,7 @@ ${workCompletionTable || '*No work tasks recorded this week*'}
           </div>
           <input
             type="file"
-            accept=".docx"
+            accept={acceptFiles}
             onChange={(e) => handleFileUpload(fileType, e.target.files[0])}
             className="hidden"
             disabled={allowTextInput && useTextInput[fileType]}
@@ -545,8 +566,9 @@ ${workCompletionTable || '*No work tasks recorded this week*'}
             <FileUploadBox
               title="Treehouse Tracker"
               fileType="treehouseTracker"
-              description="Work completion checklist"
+              description="Work completion checklist (.xlsx)"
               allowTextInput={false}
+              acceptFiles=".xlsx,.xls"
             />
             <FileUploadBox
               title="Goal Info"
